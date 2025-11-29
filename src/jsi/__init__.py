@@ -56,18 +56,44 @@ def get_user(username: str) -> str:
 
 
 @cache
-def get_all_tracks(album: str) -> dict | None:
+def get_artist(name: str) -> dict:
+    response = jellyfin(f"/Artists/{name}")
+    return response
+
+
+@cache
+def get_all_albums(artist: str) -> list:
     search = {
-        "mediaTypes": "Audio",
-        "searchTerm": album,
+        "parentId": get_artist(artist).get("Id"),
         "includeItemTypes": "MusicAlbum",
     }
+    response = jellyfin("/Items", params=search)
+    return response.get("Items", [])
 
-    response = jellyfin("/Search/Hints", params=search)
-    if search_hits := response.get("SearchHints"):
-        search = {"ParentId": search_hits[0].get("Id")}
-        response = jellyfin(f"/Users/{USER}/Items", params=search)
-        return response.get("Items")
+
+@cache
+@click.pass_context
+def get_all_tracks(ctx, artist: str, album: str) -> dict | None:
+    response = None
+    albums = get_all_albums(artist)
+
+    for item in albums:
+        if fuzz.QRatio(
+            item.get("Name"),
+            album,
+            processor=utils.default_process,
+        ) == ctx.params.get("fuzz"):
+            response = jellyfin(
+                "/Items",
+                params={
+                    "parentId": item.get("Id"),
+                    "recursive": True,
+                    "mediaTypes": "Audio",
+                    "limit": 100,
+                },
+            ).get("Items")
+
+    return response
 
 
 def get_playlist(name: str) -> dict:
@@ -95,7 +121,7 @@ def get_music(ctx, track: dict) -> dict:
         "limit": 100,
     }
     track_found = {}
-    if tracks := get_all_tracks(track["albumName"]):
+    if tracks := get_all_tracks(track["artistName"], track["albumName"]):
         for item in tracks:
             if fuzz.QRatio(
                 item.get("Name"),
@@ -133,7 +159,6 @@ def get_music(ctx, track: dict) -> dict:
         logging.warning(
             f"Track not found: {track['trackName']} Artist: {track['artistName']} Album: {track['albumName']}"
         )
-
     return track_found
 
 
