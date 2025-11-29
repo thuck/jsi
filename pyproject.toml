@@ -5,7 +5,12 @@ description = "Import spotify playlists from data exported"
 readme = "README.md"
 authors = [{ name = "thuck", email = "denisdoria@gmail.com" }]
 requires-python = ">=3.13"
-dependencies = ["click>=8.3.1", "rapidfuzz>=3.14.3", "requests>=2.32.5"]
+dependencies = [
+    "click>=8.3.1",
+    "rapidfuzz>=3.14.3",
+    "requests>=2.32.5",
+    "urllib3>=2.5.0",
+]
 
 [project.scripts]
 jsi = "jsi:main"

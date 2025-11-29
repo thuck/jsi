@@ -2,12 +2,12 @@ import csv
 import json
 import logging
 import sys
-import urllib3
 from functools import cache
 from pathlib import Path
 
 import click
 import requests
+import urllib3
 from rapidfuzz import fuzz, utils
 
 USER = ""
