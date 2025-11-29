@@ -1,0 +1,15 @@
+[project]
+name = "jsi"
+version = "0.1.0"
+description = "Import spotify playlists from data exported"
+readme = "README.md"
+authors = [{ name = "thuck", email = "denisdoria@gmail.com" }]
+requires-python = ">=3.13"
+dependencies = ["click>=8.3.1", "rapidfuzz>=3.14.3", "requests>=2.32.5"]
+
+[project.scripts]
+jsi = "jsi:main"
+
+[build-system]
+requires = ["uv_build>=0.9.13,<0.10.0"]
+build-backend = "uv_build"
