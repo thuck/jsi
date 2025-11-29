@@ -66,6 +66,8 @@ def get_all_albums(artist: str) -> list:
     search = {
         "parentId": get_artist(artist).get("Id"),
         "includeItemTypes": "MusicAlbum",
+        "sortBy": "ProductionYear",
+        "sortOrder": "Ascending",
     }
     response = jellyfin("/Items", params=search)
     return response.get("Items", [])
@@ -73,8 +75,8 @@ def get_all_albums(artist: str) -> list:
 
 @cache
 @click.pass_context
-def get_all_tracks(ctx, artist: str, album: str) -> dict | None:
-    response = None
+def get_all_tracks(ctx, artist: str, album: str) -> dict:
+    response = {}
     albums = get_all_albums(artist)
 
     for item in albums:
@@ -91,7 +93,7 @@ def get_all_tracks(ctx, artist: str, album: str) -> dict | None:
                     "mediaTypes": "Audio",
                     "limit": 100,
                 },
-            ).get("Items")
+            ).get("Items", {})
 
     return response
 
@@ -115,12 +117,6 @@ def get_playlist(name: str) -> dict:
 
 @click.pass_context
 def get_music(ctx, track: dict) -> dict:
-    search = {
-        "mediaTypes": "Audio",
-        "searchTerm": track["trackName"],
-        "limit": 100,
-    }
-    track_found = {}
     if tracks := get_all_tracks(track["artistName"], track["albumName"]):
         for item in tracks:
             if fuzz.QRatio(
@@ -131,35 +127,29 @@ def get_music(ctx, track: dict) -> dict:
                 "fuzz"
             ):  # Jellyfin can't find songs with special chars sometimes
                 # fuzz.QRatio helps to solve the special chars issue
-                track_found = item
                 logging.info(
                     f"Track found: {track['trackName']} Artist: {track['artistName']} Album: {track['albumName']}"
                 )
-                break
+                return item
 
-    if ctx.params.get("any_album") and not track_found:
-        response = jellyfin("/Search/Hints", params=search)
-
-        if search_hints := response.get("SearchHints"):
-            for item in search_hints:
+    if ctx.params.get("any_album"):
+        albums = get_all_albums(track["artistName"])
+        for album in albums:
+            for item in get_all_tracks(track["artistName"], album.get("Name")):
                 if fuzz.QRatio(
-                    item.get("AlbumArtist"),
-                    track["artistName"],
+                    item.get("Name"),
+                    track["trackName"],
                     processor=utils.default_process,
-                ) == ctx.params.get(
-                    "fuzz"
-                ):  # Search returned the song, but not in the correct album
+                ) == ctx.params.get("fuzz"):
                     logging.info(
                         f"Track found: {track['trackName']} Artist: {track['artistName']} Album: {item.get('Album')} AlbumOriginal: {track['albumName']}"
                     )
-                    track_found = item
-                    break
+                    return item
 
-    if not track_found:
-        logging.warning(
-            f"Track not found: {track['trackName']} Artist: {track['artistName']} Album: {track['albumName']}"
-        )
-    return track_found
+    logging.warning(
+        f"Track not found: {track['trackName']} Artist: {track['artistName']} Album: {track['albumName']}"
+    )
+    return {}
 
 
 def get_playlist_items(name: str) -> set:
