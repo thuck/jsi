@@ -6,45 +6,15 @@ from functools import cache
 from pathlib import Path
 
 import click
-import requests
 import urllib3
+from jellyfin_apiclient_python import JellyfinClient
 from rapidfuzz import fuzz, utils
 
-USER = ""
 urllib3.disable_warnings(category=urllib3.exceptions.InsecureRequestWarning)
 
 
-@click.pass_context
-def jellyfin(ctx, path, method=requests.get, payload={}, params={}) -> dict:
-    headers = {"Authorization": f"MediaBrowser Token={ctx.params['token']}"}
-    url = ctx.params["url"]
-    result = {}
-    try:
-        response = method(
-            f"{url}{path}",
-            headers=headers,
-            params=params,
-            json=payload,
-            verify=not ctx.params.get("skip_tls"),
-        )
-    except requests.exceptions.SSLError as e:
-        logging.error(f"SSL: {e}")
-        sys.exit(1)
-    except requests.exceptions.ConnectionError as e:
-        logging.error(f"Connection: {e}")
-        sys.exit(1)
-
-    try:
-        result = response.json()
-    except requests.exceptions.JSONDecodeError:
-        if not response.ok:
-            logging.error(f"Jellyfin status code: {response.status_code}")
-            sys.exit(1)
-    return result
-
-
-def get_user(username: str) -> str:
-    response = jellyfin("/Users")
+def get_user_id(client, username: str) -> str:
+    response = client.get_users()
     id = None
     for user in response:
         if user.get("Name") == username:
@@ -56,28 +26,23 @@ def get_user(username: str) -> str:
 
 
 @cache
-def get_artist(name: str) -> dict:
-    response = jellyfin(f"/Artists/{name}")
-    return response
-
-
-@cache
-def get_all_albums(artist: str) -> list:
+def get_all_albums(artist: str, client) -> list:
+    artist_id = client._get(f"/Artists/{artist}").get("Id")
     search = {
-        "parentId": get_artist(artist).get("Id"),
+        "parentId": artist_id,
         "includeItemTypes": "MusicAlbum",
         "sortBy": "ProductionYear",
         "sortOrder": "Ascending",
     }
-    response = jellyfin("/Items", params=search)
+    response = client.items(params=search)
     return response.get("Items", [])
 
 
 @cache
 @click.pass_context
-def get_all_tracks(ctx, artist: str, album: str) -> dict:
+def get_all_tracks(ctx, artist: str, album: str, client) -> dict:
     response = {}
-    albums = get_all_albums(artist)
+    albums = get_all_albums(artist, client)
 
     for item in albums:
         if fuzz.QRatio(
@@ -85,8 +50,7 @@ def get_all_tracks(ctx, artist: str, album: str) -> dict:
             album,
             processor=utils.default_process,
         ) == ctx.params.get("fuzz"):
-            response = jellyfin(
-                "/Items",
+            response = client.items(
                 params={
                     "parentId": item.get("Id"),
                     "recursive": True,
@@ -98,14 +62,14 @@ def get_all_tracks(ctx, artist: str, album: str) -> dict:
     return response
 
 
-def get_playlist(name: str) -> dict:
-    response = jellyfin(f"/Users/{USER}/Items")
+def get_playlist(name: str, client, user_id: str) -> dict:
+    response = client.media_folders()
     playlist_folder = {
         "ParentId": item.get("Id")
         for item in response.get("Items", {})
         if item.get("Type") == "ManualPlaylistsFolder"
     }
-    response = jellyfin(f"/Users/{USER}/Items", params=playlist_folder)
+    response = client._get(f"Users/{user_id}/Items", params=playlist_folder)
 
     playlist = [
         playlist
@@ -116,8 +80,8 @@ def get_playlist(name: str) -> dict:
 
 
 @click.pass_context
-def get_music(ctx, track: dict) -> dict:
-    if tracks := get_all_tracks(track["artistName"], track["albumName"]):
+def get_music(ctx, track: dict, client) -> dict:
+    if tracks := get_all_tracks(track["artistName"], track["albumName"], client):
         for item in tracks:
             if fuzz.QRatio(
                 item.get("Name"),
@@ -133,9 +97,9 @@ def get_music(ctx, track: dict) -> dict:
                 return item
 
     if ctx.params.get("any_album"):
-        albums = get_all_albums(track["artistName"])
+        albums = get_all_albums(track["artistName"], client)
         for album in albums:
-            for item in get_all_tracks(track["artistName"], album.get("Name")):
+            for item in get_all_tracks(track["artistName"], album.get("Name"), client):
                 if fuzz.QRatio(
                     item.get("Name"),
                     track["trackName"],
@@ -152,33 +116,32 @@ def get_music(ctx, track: dict) -> dict:
     return {}
 
 
-def get_playlist_items(name: str) -> set:
+def get_playlist_items(name: str, client, user_id: str) -> set:
     ids = set()
-    if playlist := get_playlist(name):
-        response = jellyfin(
-            f"/Playlists/{playlist.get('Id')}/Items", params={"userId": USER}
+    if playlist := get_playlist(name, client, user_id):
+        response = client._get(
+            f"/Playlists/{playlist.get('Id')}/Items", params={"userId": user_id}
         )
         ids = {item.get("Id") for item in response.get("Items", [])}
     return ids
 
 
 @click.pass_context
-def create_playlist(ctx, name: str, tracks: list):
-    tracks_jellyfin = [get_music(track).get("Id") for track in tracks]
+def create_playlist(ctx, name: str, tracks: list, client, user):
+    tracks_jellyfin = [get_music(track, client).get("Id") for track in tracks]
     if tracks := [
         track for track in tracks_jellyfin if track
     ]:  # Avoid creation of empty playlists
-        if playlist := get_playlist(name):
-            existing_tracks = get_playlist_items(name)
+        if playlist := get_playlist(name, client, user):
+            existing_tracks = get_playlist_items(name, client, user)
             if new_tracks := set(tracks).difference(existing_tracks):
                 logging.info(f"Playlist update: {name}")
                 if not ctx.params.get("dry_run"):
-                    jellyfin(
+                    client._post(
                         f"/Playlists/{playlist.get('Id')}/Items",
-                        method=requests.post,
                         params={
                             "ids": ",".join(new_tracks),
-                            "userId": USER,
+                            "userId": user,
                         },
                     )
                 else:
@@ -193,16 +156,15 @@ def create_playlist(ctx, name: str, tracks: list):
         else:
             logging.info(f"Playlist creating: {name}")
             if not ctx.params.get("dry_run"):
-                jellyfin(
+                client._post(
                     "/Playlists",
-                    payload={
+                    json={
                         "Name": name,
                         "MediaType": "Audio",
                         "isPublic": ctx.params["private"],
-                        "userId": USER,
+                        "userId": user,
                         "Ids": tracks,
                     },
-                    method=requests.post,
                 )
             else:
                 logging.info(f"Dry run: /Playlists | 'ids': {','.join(tracks)}")
@@ -218,6 +180,23 @@ def spotify_parser(content: dict) -> dict:
         if playlist.get("items")
     }
     return result
+
+
+@click.pass_context
+def jellyfin_client(ctx):
+    client = JellyfinClient()
+    client.config.data["app.name"] = "jsi"
+    client.config.data["app.version"] = "0.1.1"
+    client.config.data["auth.ssl"] = not ctx.params["skip_tls"]
+    client.authenticate(
+        {
+            "Servers": [
+                {"AccessToken": ctx.params["token"], "address": ctx.params["url"]}
+            ]
+        },
+        discover=False,
+    )
+    return client.jellyfin
 
 
 @click.command()
@@ -266,9 +245,9 @@ def main(
     log_level: str,
     skip_tls: bool,
 ):
-    global USER
     logging.basicConfig(level=log_level.upper(), format="%(levelname)s: %(message)s")
-    USER = get_user(user)
+    client = jellyfin_client()
+    user_id = get_user_id(client, user)
     p = Path(filename).expanduser()
     with p.open() as _f:
         if spotify:
@@ -280,7 +259,7 @@ def main(
             playlists = spotify_parser(sp_playlists)
 
             for playlist, tracks in playlists.items():
-                create_playlist(playlist, tracks)
+                create_playlist(playlist, tracks, client, user_id)
         elif _csv:
             tracks = csv.DictReader(
                 _f,
@@ -289,7 +268,9 @@ def main(
                 field in (tracks.fieldnames or [])
                 for field in ["trackName", "artistName", "albumName"]
             ):
-                create_playlist(Path(filename).stem, [row for row in tracks])
+                create_playlist(
+                    Path(filename).stem, [row for row in tracks], client, user_id
+                )
             else:
                 logging.error("CSV: cannot find field(s)")
                 sys.exit(1)
