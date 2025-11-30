@@ -8,6 +8,7 @@ from pathlib import Path
 import click
 import urllib3
 from jellyfin_apiclient_python import JellyfinClient
+from jellyfin_apiclient_python.exceptions import HTTPException
 from rapidfuzz import fuzz, utils
 
 urllib3.disable_warnings(category=urllib3.exceptions.InsecureRequestWarning)
@@ -27,7 +28,12 @@ def get_user_id(client, username: str) -> str:
 
 @cache
 def get_all_albums(artist: str, client) -> list:
-    artist_id = client._get(f"/Artists/{artist}").get("Id")
+    try:
+        artist_id = client._get(f"/Artists/{artist}").get("Id")
+    except HTTPException as e:
+        logging.error(f"Artist: {artist} error: {e}")
+        return []
+
     search = {
         "parentId": artist_id,
         "includeItemTypes": "MusicAlbum",
@@ -120,7 +126,7 @@ def get_playlist_items(name: str, client, user_id: str) -> set:
     ids = set()
     if playlist := get_playlist(name, client, user_id):
         response = client._get(
-            f"/Playlists/{playlist.get('Id')}/Items", params={"userId": user_id}
+            f"Playlists/{playlist.get('Id')}/Items", params={"userId": user_id}
         )
         ids = {item.get("Id") for item in response.get("Items", [])}
     return ids
@@ -129,7 +135,9 @@ def get_playlist_items(name: str, client, user_id: str) -> set:
 @click.pass_context
 def create_playlist(ctx, name: str, tracks: list, client, user):
     jellyfin_tracks = set(
-        jt for track in tracks if (jt := get_music(track, client)) if jt is not None
+        jt
+        for track in tracks
+        if track is not None and (jt := get_music(track, client)) is not None
     )
     if jellyfin_tracks:  # Avoid creation of empty playlists
         if playlist := get_playlist(name, client, user):
@@ -138,7 +146,7 @@ def create_playlist(ctx, name: str, tracks: list, client, user):
                 logging.info(f"Playlist update: {name}")
                 if not ctx.params.get("dry_run"):
                     client._post(
-                        f"/Playlists/{playlist.get('Id')}/Items",
+                        f"Playlists/{playlist.get('Id')}/Items",
                         params={
                             "ids": ",".join(new_tracks),
                             "userId": user,
@@ -157,13 +165,13 @@ def create_playlist(ctx, name: str, tracks: list, client, user):
             logging.info(f"Playlist creating: {name}")
             if not ctx.params.get("dry_run"):
                 client._post(
-                    "/Playlists",
+                    "Playlists",
                     json={
                         "Name": name,
                         "MediaType": "Audio",
                         "isPublic": ctx.params["private"],
                         "userId": user,
-                        "Ids": tracks,
+                        "Ids": list(jellyfin_tracks),
                     },
                 )
             else:
