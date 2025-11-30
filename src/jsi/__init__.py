@@ -80,7 +80,7 @@ def get_playlist(name: str, client, user_id: str) -> dict:
 
 
 @click.pass_context
-def get_music(ctx, track: dict, client) -> dict:
+def get_music(ctx, track: dict, client) -> str | None:
     if tracks := get_all_tracks(track["artistName"], track["albumName"], client):
         for item in tracks:
             if fuzz.QRatio(
@@ -94,7 +94,7 @@ def get_music(ctx, track: dict, client) -> dict:
                 logging.info(
                     f"Track found: {track['trackName']} Artist: {track['artistName']} Album: {track['albumName']}"
                 )
-                return item
+                return item.get("Id")
 
     if ctx.params.get("any_album"):
         albums = get_all_albums(track["artistName"], client)
@@ -108,12 +108,12 @@ def get_music(ctx, track: dict, client) -> dict:
                     logging.info(
                         f"Track found: {track['trackName']} Artist: {track['artistName']} Album: {item.get('Album')} AlbumOriginal: {track['albumName']}"
                     )
-                    return item
+                    return item.get("Id")
 
     logging.warning(
         f"Track not found: {track['trackName']} Artist: {track['artistName']} Album: {track['albumName']}"
     )
-    return {}
+    return None
 
 
 def get_playlist_items(name: str, client, user_id: str) -> set:
@@ -128,13 +128,13 @@ def get_playlist_items(name: str, client, user_id: str) -> set:
 
 @click.pass_context
 def create_playlist(ctx, name: str, tracks: list, client, user):
-    tracks_jellyfin = [get_music(track, client).get("Id") for track in tracks]
-    if tracks := [
-        track for track in tracks_jellyfin if track
-    ]:  # Avoid creation of empty playlists
+    jellyfin_tracks = set(
+        jt for track in tracks if (jt := get_music(track, client)) if jt is not None
+    )
+    if jellyfin_tracks:  # Avoid creation of empty playlists
         if playlist := get_playlist(name, client, user):
-            existing_tracks = get_playlist_items(name, client, user)
-            if new_tracks := set(tracks).difference(existing_tracks):
+            playlist_tracks = get_playlist_items(name, client, user)
+            if new_tracks := jellyfin_tracks.difference(playlist_tracks):
                 logging.info(f"Playlist update: {name}")
                 if not ctx.params.get("dry_run"):
                     client._post(
@@ -167,7 +167,9 @@ def create_playlist(ctx, name: str, tracks: list, client, user):
                     },
                 )
             else:
-                logging.info(f"Dry run: /Playlists | 'ids': {','.join(tracks)}")
+                logging.info(
+                    f"Dry run: /Playlists | 'ids': {','.join(jellyfin_tracks)}"
+                )
     else:
         logging.info(f"Playlist skip creation: {name} no tracks found on jellyfin")
 
@@ -186,7 +188,7 @@ def spotify_parser(content: dict) -> dict:
 def jellyfin_client(ctx):
     client = JellyfinClient()
     client.config.data["app.name"] = "jsi"
-    client.config.data["app.version"] = "0.1.1"
+    client.config.data["app.version"] = "0.1.2"
     client.config.data["auth.ssl"] = not ctx.params["skip_tls"]
     client.authenticate(
         {
