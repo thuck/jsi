@@ -1,6 +1,6 @@
 [project]
 name = "jsi"
-version = "0.1.2"
+version = "0.2.0"
 description = "Import spotify playlists from data exported"
 readme = "README.md"
 authors = [{ name = "thuck", email = "denisdoria@gmail.com" }]

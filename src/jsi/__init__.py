@@ -169,7 +169,7 @@ def create_playlist(ctx, name: str, tracks: list, client, user):
                     json={
                         "Name": name,
                         "MediaType": "Audio",
-                        "isPublic": ctx.params["private"],
+                        "IsPublic": ctx.params["public"],
                         "userId": user,
                         "Ids": list(jellyfin_tracks),
                     },
@@ -196,7 +196,7 @@ def spotify_parser(content: dict) -> dict:
 def jellyfin_client(ctx):
     client = JellyfinClient()
     client.config.data["app.name"] = "jsi"
-    client.config.data["app.version"] = "0.1.2"
+    client.config.data["app.version"] = "0.2.0"
     client.config.data["auth.ssl"] = not ctx.params["skip_tls"]
     client.authenticate(
         {
@@ -220,7 +220,7 @@ def jellyfin_client(ctx):
 )
 @click.option("--token", required=True, help="API token")
 @click.option("--user", required=True, help="Username")
-@click.option("--private", is_flag=True, help="Sets playlist to private on creation")
+@click.option("--public", is_flag=True, help="Sets playlist to public on creation")
 @click.option(
     "--any-album",
     is_flag=True,
@@ -247,7 +247,7 @@ def main(
     _csv: bool,
     token: str,
     user: str,
-    private: bool,
+    public: bool,
     any_album: bool,
     url: str,
     fuzz: int,

@@ -33,7 +33,7 @@ Options:
                                   artistName, albumName
   --token TEXT                    API token  [required]
   --user TEXT                     Username  [required]
-  --private                       Sets playlist to private on creation
+  --public                        Sets playlist to public on creation
   --any-album                     Search track in any album
   --url TEXT                      Jellyfin url instance  [required]
   --fuzz INTEGER RANGE            Tolerance for the fuzzy match, higher values
