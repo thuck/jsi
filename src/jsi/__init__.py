@@ -55,7 +55,7 @@ def get_all_tracks(ctx, artist: str, album: str, client) -> dict:
             item.get("Name"),
             album,
             processor=utils.default_process,
-        ) == ctx.params.get("fuzz"):
+        ) >= ctx.params.get("fuzz"):
             response = client.items(
                 params={
                     "parentId": item.get("Id"),
@@ -93,7 +93,7 @@ def get_music(ctx, track: dict, client) -> str | None:
                 item.get("Name"),
                 track["trackName"],
                 processor=utils.default_process,
-            ) == ctx.params.get(
+            ) >= ctx.params.get(
                 "fuzz"
             ):  # Jellyfin can't find songs with special chars sometimes
                 # fuzz.QRatio helps to solve the special chars issue
@@ -110,7 +110,7 @@ def get_music(ctx, track: dict, client) -> str | None:
                     item.get("Name"),
                     track["trackName"],
                     processor=utils.default_process,
-                ) == ctx.params.get("fuzz"):
+                ) >= ctx.params.get("fuzz"):
                     logging.info(
                         f"Track found: {track['trackName']} Artist: {track['artistName']} Album: {item.get('Album')} AlbumOriginal: {track['albumName']}"
                     )
@@ -143,7 +143,7 @@ def create_playlist(ctx, name: str, tracks: list, client, user):
         if playlist := get_playlist(name, client, user):
             playlist_tracks = get_playlist_items(name, client, user)
             if new_tracks := jellyfin_tracks.difference(playlist_tracks):
-                logging.info(f"Playlist update: {name}")
+                logging.info(f"Playlist update: {name} added tracks: {len(new_tracks)}")
                 if not ctx.params.get("dry_run"):
                     client._post(
                         f"Playlists/{playlist.get('Id')}/Items",
