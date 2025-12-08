@@ -196,7 +196,7 @@ def spotify_parser(content: dict) -> dict:
 def jellyfin_client(ctx):
     client = JellyfinClient()
     client.config.data["app.name"] = "jsi"
-    client.config.data["app.version"] = "0.2.0"
+    client.config.data["app.version"] = "0.2.1"
     client.config.data["auth.ssl"] = not ctx.params["skip_tls"]
     client.authenticate(
         {
