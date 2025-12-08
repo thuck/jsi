@@ -14,6 +14,15 @@ from rapidfuzz import fuzz, utils
 urllib3.disable_warnings(category=urllib3.exceptions.InsecureRequestWarning)
 
 
+@click.pass_context
+def match_check(ctx, x: str, y: str) -> bool:
+    return fuzz.QRatio(
+        x,
+        y,
+        processor=utils.default_process,
+    ) >= ctx.params.get("fuzz")
+
+
 def get_user_id(client, username: str) -> str:
     response = client.get_users()
     id = None
@@ -45,17 +54,12 @@ def get_all_albums(artist: str, client) -> list:
 
 
 @cache
-@click.pass_context
-def get_all_tracks(ctx, artist: str, album: str, client) -> dict:
+def get_all_tracks(artist: str, album: str, client) -> dict:
     response = {}
     albums = get_all_albums(artist, client)
 
     for item in albums:
-        if fuzz.QRatio(
-            item.get("Name"),
-            album,
-            processor=utils.default_process,
-        ) >= ctx.params.get("fuzz"):
+        if match_check(item.get("Name"), album):
             response = client.items(
                 params={
                     "parentId": item.get("Id"),
@@ -89,14 +93,10 @@ def get_playlist(name: str, client, user_id: str) -> dict:
 def get_music(ctx, track: dict, client) -> str | None:
     if tracks := get_all_tracks(track["artistName"], track["albumName"], client):
         for item in tracks:
-            if fuzz.QRatio(
+            if match_check(
                 item.get("Name"),
                 track["trackName"],
-                processor=utils.default_process,
-            ) >= ctx.params.get(
-                "fuzz"
-            ):  # Jellyfin can't find songs with special chars sometimes
-                # fuzz.QRatio helps to solve the special chars issue
+            ):
                 logging.info(
                     f"Track found: {track['trackName']} Artist: {track['artistName']} Album: {track['albumName']}"
                 )
@@ -106,11 +106,10 @@ def get_music(ctx, track: dict, client) -> str | None:
         albums = get_all_albums(track["artistName"], client)
         for album in albums:
             for item in get_all_tracks(track["artistName"], album.get("Name"), client):
-                if fuzz.QRatio(
+                if match_check(
                     item.get("Name"),
                     track["trackName"],
-                    processor=utils.default_process,
-                ) >= ctx.params.get("fuzz"):
+                ):
                     logging.info(
                         f"Track found: {track['trackName']} Artist: {track['artistName']} Album: {item.get('Album')} AlbumOriginal: {track['albumName']}"
                     )
@@ -196,7 +195,7 @@ def spotify_parser(content: dict) -> dict:
 def jellyfin_client(ctx):
     client = JellyfinClient()
     client.config.data["app.name"] = "jsi"
-    client.config.data["app.version"] = "0.2.1"
+    client.config.data["app.version"] = "0.2.2"
     client.config.data["auth.ssl"] = not ctx.params["skip_tls"]
     client.authenticate(
         {
